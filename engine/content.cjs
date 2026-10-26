@@ -5,12 +5,27 @@ const { success, idBytes, fixedOutput, pathRequest, resultError, withCleanup, cl
 
 const inactive = new Set([0x21005, 0x20a05]);
 
-async function discoverInstalled({ s, domain, service, title, metaType, kind }) {
-  const label = metaType === 0x80 ? 'application' : metaType === 0x82 ? 'DLC' : 'update';
+// User-installable storages: BuiltInUser (4), SdCard (5), GameCard (2).
+const USER_STORAGES = [4, 5, 2];
+// System storage: BuiltInSystem (3) — holds firmware applets and system data archives.
+const SYSTEM_STORAGES = [3];
+
+/// Human-readable label for an NcmContentMetaType value.
+function metaLabel(metaType) {
+  if (metaType === 0x80) return 'application';
+  if (metaType === 0x81) return 'update';
+  if (metaType === 0x82) return 'DLC';
+  if (metaType === 1) return 'system program';
+  if (metaType === 2) return 'system data';
+  return 'content';
+}
+
+async function discoverInstalled({ s, domain, service, title, metaType, kind, storages = USER_STORAGES }) {
+  const label = metaLabel(metaType);
   const ncm = await service('ncm');
   const records = [];
 
-  for (const storage of [4, 5, 2]) {
+  for (const storage of storages) {
     let database;
 
     try {
@@ -121,7 +136,26 @@ const discoverDlc = (options) => discoverInstalled({ ...options, metaType: 0x82,
 const discoverApplications = (options) =>
   discoverInstalled({ ...options, title: '0000000000000000', metaType: 0x80, kind: 'applications' });
 
-// Resolve a pinned Program or DLC Data record without mounting its filesystem.
+// System-side enumerators: walk BuiltInSystem only, with the two system meta-types.
+const discoverSystemPrograms = (options) =>
+  discoverInstalled({
+    ...options,
+    title: '0000000000000000',
+    metaType: 1,
+    kind: 'system programs',
+    storages: SYSTEM_STORAGES,
+  });
+const discoverSystemData = (options) =>
+  discoverInstalled({
+    ...options,
+    title: '0000000000000000',
+    metaType: 2,
+    kind: 'system data',
+    storages: SYSTEM_STORAGES,
+  });
+
+// Resolve a pinned Program or Data record without mounting its filesystem.
+// contentType = 1 (Program) or 2 (Data). SystemData archives always use 2.
 
 
 
@@ -227,6 +261,9 @@ const resolveControlContent = (options) =>
 const resolveDlcContent = (options) => {
   return resolveContent({ ...options, contentType: 2 });
 };
+/// Resolve a SystemData archive's Data NCA path. No update/DLC chain, no owner check.
+const resolveSystemDataContent = (options) =>
+  resolveContent({ ...options, update: undefined, dlc: undefined, contentType: 2 });
 
 async function findOriginalContent(options) {
   for (const storage of [4, 5, 2]) {
@@ -414,6 +451,8 @@ async function discoverGames({ s, root, domain, service, filesystem, shouldStop 
 
 module.exports = {
   discoverGames, discoverUpdates, discoverDlc,
-  resolveProgramContent, resolveDlcContent, findOriginalContent,
+  discoverSystemPrograms, discoverSystemData,
+  resolveProgramContent, resolveDlcContent, resolveSystemDataContent, findOriginalContent,
   isInstalledUpdate, programMatchesApplication,
+  USER_STORAGES, SYSTEM_STORAGES,
 };
