@@ -39,12 +39,8 @@ static const u32 cSourceHandle = 0x1234;
 /// Byte at a given offset of the fake RomFS storage; the Python test computes the same function.
 static u8 pattern(u64 offset) { return (u8) ((offset * 131u) ^ (offset >> 8)); }
 
-static int sdk_socket(int domain, int type, int protocol) {
-    int fd = socket(domain, type, protocol);
-    int on = 1;
-    if (fd >= 0) setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)); // Fast reruns.
-    return fd;
-}
+// No SO_REUSEADDR here: native.c must cope with TIME_WAIT on its own, exactly as on the console.
+static int sdk_socket(int domain, int type, int protocol) { return socket(domain, type, protocol); }
 static int sdk_bind(int fd, const Address* a, u32 n) { return bind(fd, (const struct sockaddr*) a, n); }
 static int sdk_listen(int fd, int backlog) { return listen(fd, backlog); }
 static int sdk_accept(int fd, Address* a, u32* n) { return accept(fd, (struct sockaddr*) a, (socklen_t*) n); }
@@ -70,6 +66,8 @@ static int sdk_thread_create(u64* thread, void* attributes, void* (*entry)(void*
     return result;
 }
 static int sdk_thread_join(u64 thread, void** value) { return pthread_join((pthread_t) (uintptr_t) thread, value); }
+static int sdk_setsockopt(int fd, int level, int option, const void* value, u32 n) { return setsockopt(fd, level, option, value, n); }
+static int sdk_connect(int fd, const Address* a, u32 n) { return connect(fd, (const struct sockaddr*) a, n); }
 
 /**
  * @brief Fake fsp IPC: decode the read request native.c's packet() builds and answer it.
@@ -198,6 +196,7 @@ int main(int argc, char** argv) {
     static ServerFunctions functions = {
         sdk_socket, sdk_bind, sdk_listen, sdk_accept, sdk_recv, sdk_send, sdk_close, sdk_poll,
         sdk_sockname, sdk_fcntl, sdk_errno, sdk_ipc, sdk_close_handle, sdk_thread_create, sdk_thread_join,
+        sdk_setsockopt, sdk_connect,
     };
     Source source = {cSourceHandle, 0, 0, 0, tree.next_offset};
     u64 slot_bytes = 4096 + cDataBytes + cIpcBytes + cScratchBytes;
@@ -221,10 +220,11 @@ int main(int argc, char** argv) {
     pthread_create(&server, 0, run_server, config);
     while (!config->state) usleep(1000);
     if (config->state != 1) {
-        fprintf(stderr, "server failed to start (state %u)\n", config->state);
+        fprintf(stderr, "server failed to start (state %u, phase %u, errno %llu)\n", config->state, config->phase,
+                config->native_result);
         return 1;
     }
-    printf("ready\n");
+    printf("ready ip=%u.%u.%u.%u\n", config->ip[0], config->ip[1], config->ip[2], config->ip[3]);
     fflush(stdout);
 
     char ignored[64];

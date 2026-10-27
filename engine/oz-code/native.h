@@ -32,7 +32,17 @@ typedef struct {
     u32 (*close_handle)(u32);
     int (*thread_create)(u64*, void*, void* (*)(void*), void*);
     int (*thread_join)(u64, void**);
+    int (*setsockopt)(int, int, int, const void*, u32);
+    int (*connect)(int, const Address*, u32);
 } ServerFunctions;
+/// Written to ServerConfig.phase when startup fails (state 3), so the host can say which step broke.
+enum StartupPhase {
+    PHASE_CONFIG = 1, ///< Host-written configuration rejected.
+    PHASE_INDEX = 2,  ///< File index from engine/mounts.cjs rejected.
+    PHASE_SOCKET = 3, ///< socket(); native_result holds errno from here on.
+    PHASE_BIND = 4,
+    PHASE_LISTEN = 5,
+};
 // kinds: 0 = base/update romfs, 1 = exefs, 2 = dlc romfs
 typedef struct {u32 handle; u8 kind, attributes; u16 reserved; u64 size;} Source;
 typedef struct {
@@ -59,6 +69,7 @@ typedef struct ServerConfigTag {
 } ServerConfig;
 _Static_assert(sizeof(Address) == 16 && sizeof(PollFd) == 8 && sizeof(Node) == 48, "wire ABI");
 _Static_assert(sizeof(Source) == 16, "source ABI");
+_Static_assert(sizeof(ServerFunctions) == 17 * 8, "function table ABI");
 _Static_assert(__builtin_offsetof(ServerConfig, functions) == 64 && sizeof(ServerConfig) == 256, "configuration ABI");
 void* server_main(void* configuration);
 #endif

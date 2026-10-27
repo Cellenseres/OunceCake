@@ -31,6 +31,13 @@
 #define YIELD_IDLE_POLLS 5      ///< Only connections idle this long yield under pressure; a just-finished one is likely reused.
 #define LISTEN_BACKLOG 32       ///< Queue for connections waiting on claim_slot; a short queue makes clients see resets.
 #define LAST_MODIFIED "Thu, 01 Jan 1970 00:00:00 GMT"
+// nn::socket uses BSD values.
+#define AF_INET 2
+#define SOCK_STREAM 1
+#define SOCK_DGRAM 2
+#define SOL_SOCKET 0xffff
+#define SO_REUSEADDR 0x0004
+#define ROUTE_PROBE_ADDRESS 0x01010101u ///< 1.1.1.1; only used to pick the outgoing interface, nothing is sent.
 
 _Static_assert(REQUEST_BYTES + PATH_BYTES + 1 <= SCRATCH_BYTES, "scratch layout");
 
@@ -250,11 +257,13 @@ static int decode_path(const char* target,u64 bytes,char* out) {
     out[at]=0;return 1;
 }
 
-/// Bounded text builder for response headers; `ok` latches to 0 on overflow.
+/// Bounded text builder for response headers; output is always NUL-terminated and `ok` latches to 0 on overflow.
 typedef struct {char* out; u64 capacity, at; int ok;} Text;
+static Text text_init(char* out,u64 capacity) {out[0]=0;Text t={out,capacity,0,1};return t;}
 static void text_bytes(Text* t,const void* data,u64 bytes) {
-    if(!t->ok||bytes>t->capacity-t->at) {t->ok=0;return;}
-    memcpy(t->out+t->at,data,bytes);t->at+=bytes;
+    // `>=` keeps one byte free for the terminator.
+    if(!t->ok||bytes>=t->capacity-t->at) {t->ok=0;return;}
+    memcpy(t->out+t->at,data,bytes);t->at+=bytes;t->out[t->at]=0;
 }
 static void text_str(Text* t,const char* s) {text_bytes(t,s,length(s));}
 static void text_dec(Text* t,u64 value) {char digits[20];text_bytes(t,digits,decimal(digits,value));}
@@ -265,7 +274,7 @@ static void text_dec(Text* t,u64 value) {char digits[20];text_bytes(t,digits,dec
  * @param extra Additional pre-formatted "Name: value\r\n" lines, or 0.
  */
 static int send_head(Client* p,const char* status,const char* type,u64 content_length,const char* extra) {
-    char buffer[768];Text t={buffer,sizeof(buffer),0,1};
+    char buffer[768];Text t=text_init(buffer,sizeof(buffer));
     text_str(&t,"HTTP/1.1 ");text_str(&t,status);
     text_str(&t,"\r\nServer: OunceCake\r\nContent-Length: ");text_dec(&t,content_length);text_str(&t,"\r\n");
     if(type) {text_str(&t,"Content-Type: ");text_str(&t,type);text_str(&t,"\r\n");}
@@ -514,7 +523,7 @@ static Range parse_range(const char* value,u64 bytes) {
 static int serve_file(Client* p,u32 id,Range range) {
     Server* s=p->server;ServerConfig* c=s->c;const Node* n=s->nodes+id;const Source* source=c->sources+n->mount;
     u64 start=0,end=n->size;
-    char extra[192];Text t={extra,sizeof(extra),0,1};
+    char extra[192];Text t=text_init(extra,sizeof(extra));
     text_str(&t,"Accept-Ranges: bytes\r\nLast-Modified: " LAST_MODIFIED "\r\n");
     if(range.present&&n->size) {
         if(range.suffix) start=n->size-minimum(range.last,n->size);
@@ -524,7 +533,8 @@ static int serve_file(Client* p,u32 id,Range range) {
                 return t.ok&&send_status(p,"416 Range Not Satisfiable",extra);
             }
             start=range.first;
-            if(!range.open)end=minimum(range.last+1,n->size);
+            // Clamp before the +1 so "bytes=0-18446744073709551615" cannot wrap to 0.
+            if(!range.open)end=minimum(range.last,n->size-1)+1;
         }
         if(start==end)return send_status(p,"416 Range Not Satisfiable",0);
         text_str(&t,"Content-Range: bytes ");text_dec(&t,start);text_str(&t,"-");text_dec(&t,end-1);
@@ -688,6 +698,32 @@ static ClientSlot* claim_slot(ServerConfig* c) {
 }
 
 /**
+ * @brief Record which startup step failed (and errno for socket steps) for the host, then bail out.
+ * @param fd Listening socket to close, or -1.
+ */
+static void* startup_failed(ServerConfig* c,u32 phase,int fd) {
+    c->phase=phase;
+    if(phase>=PHASE_SOCKET)c->native_result=(u64)(u32)c->functions->get_errno();
+    if(fd>=0)c->functions->close(fd);
+    c->state=3;return (void*)(u64)BAD;
+}
+
+/**
+ * @brief Fill c->ip with the console's LAN address before any client connects.
+ *
+ * connect() on a UDP socket only selects a route (no packet is sent), and getsockname() then
+ * reports the local address of that route. Uses nothing beyond nn::socket, so it does not depend
+ * on nifm being initialized in the host process. Leaves ip zero if there is no route.
+ */
+static void discover_address(ServerConfig* c) {
+    ServerFunctions* f=c->functions;int fd=f->socket(AF_INET,SOCK_DGRAM,0);
+    if(fd<0)return;
+    Address probe={16,AF_INET,swap16(53),ROUTE_PROBE_ADDRESS,{0}},local={0,0,0,0,{0}};u32 size=16;
+    if(!f->connect(fd,&probe,16)&&!f->sockname(fd,&local,&size)&&size==16)memcpy(c->ip,&local.address,4);
+    f->close(fd);
+}
+
+/**
  * @brief Thread entry: validate the host config, listen, and hand each connection to a slot thread.
  *
  * Slot memory layout (slot_bytes each): ClientSlot (4096), data/cache (data_bytes),
@@ -696,15 +732,21 @@ static ClientSlot* claim_slot(ServerConfig* c) {
 void* server_main(void* configuration) {
     ServerConfig* c=configuration;
     if(!c||c->magic!=CFG_MAGIC||c->version!=1)return (void*)(u64)BAD;
-    Server s;memset(&s,0,sizeof(s));s.c=c;s.cache_source=NONE;c->state=0;c->result=BAD;
+    Server s;memset(&s,0,sizeof(s));s.c=c;s.cache_source=NONE;c->state=0;c->result=BAD;c->phase=0;
     if(!c->functions||!c->ipc_buffer||!c->data||c->data_bytes<4096||c->data_bytes>0x400000||
         !c->port||c->port>65535||!c->slots||!c->reserved||c->reserved>SERVER_MAX_CLIENTS||
-        c->slot_bytes<4096+c->data_bytes+IPC_BUFFER_BYTES+SCRATCH_BYTES||!index_valid(&s)) {c->state=3;return (void*)(u64)BAD;}
+        c->slot_bytes<4096+c->data_bytes+IPC_BUFFER_BYTES+SCRATCH_BYTES)return startup_failed(c,PHASE_CONFIG,-1);
+    if(!index_valid(&s))return startup_failed(c,PHASE_INDEX,-1);
     for(u32 i=0;i<c->reserved;i++)memset(c->slots+i*c->slot_bytes,0,sizeof(ClientSlot));
-    ServerFunctions* f=c->functions;int fd=f->socket(2,1,0);
-    if(fd<0) {c->state=3;return (void*)(u64)BAD;}
-    Address address={16,2,swap16((u16)c->port),0,{0}};
-    if(f->bind(fd,&address,16)||f->listen(fd,LISTEN_BACKLOG)) {f->close(fd);c->state=3;return (void*)(u64)BAD;}
+    ServerFunctions* f=c->functions;int fd=f->socket(AF_INET,SOCK_STREAM,0);
+    if(fd<0)return startup_failed(c,PHASE_SOCKET,-1);
+    // Without this, server-closed keep-alive connections in TIME_WAIT block a quick restart on the same port.
+    // Failure is not fatal: bind will report the real problem if there is one.
+    int reuse=1;f->setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+    Address address={16,AF_INET,swap16((u16)c->port),0,{0}};
+    if(f->bind(fd,&address,16))return startup_failed(c,PHASE_BIND,fd);
+    if(f->listen(fd,LISTEN_BACKLOG))return startup_failed(c,PHASE_LISTEN,fd);
+    discover_address(c);
     c->result=0;c->state=1;
     while(!c->stop) {
         collect_clients(c,0);

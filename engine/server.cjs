@@ -44,7 +44,30 @@ const wanted = {
   sockname: '_ZN2nn6socket11GetSockNameEiPNS0_8SockAddrEPj',
   fcntl: '_ZN2nn6socket5FcntlEiiz',
   get_errno: '_ZN2nn6socket12GetLastErrnoEv',
+  setsockopt: '_ZN2nn6socket10SetSockOptEiiiPKvj',
+  connect: '_ZN2nn6socket7ConnectEiPKNS0_8SockAddrEj',
 };
+
+// Slot order of ServerFunctions in native.h. Entries not in `wanted` are filled from patched code below.
+const FUNCTION_TABLE = [
+  'socket', 'bind', 'listen', 'accept', 'recv', 'send', 'close', 'poll', 'sockname', 'fcntl', 'get_errno',
+  'ipc', 'close_handle', 'thread_create', 'thread_join', 'setsockopt', 'connect',
+];
+
+// StartupPhase in native.h, for readable startup errors.
+const STARTUP_PHASES = { 1: 'configuration check', 2: 'file index check', 3: 'socket()', 4: 'bind()', 5: 'listen()' };
+// nn::socket errno values are BSD's.
+const ERRNO_NAMES = { 13: 'EACCES', 22: 'EINVAL', 23: 'ENFILE', 24: 'EMFILE', 48: 'EADDRINUSE', 49: 'EADDRNOTAVAIL', 50: 'ENETDOWN', 55: 'ENOBUFS' };
+
+/** Explain a failed native startup from the phase and errno the payload recorded. */
+function startupError({ phase, errno }, port) {
+  const step = STARTUP_PHASES[phase] || 'unknown step ' + phase;
+  if (phase === 4 && errno === 48) {
+    return new Error(`Port ${port} is already in use on the console (is another server still running?). Try another --port.`);
+  }
+  const detail = phase >= 3 ? ` (errno ${errno}${ERRNO_NAMES[errno] ? ' ' + ERRNO_NAMES[errno] : ''})` : '';
+  return new Error(`Native server startup failed at ${step}${detail}`);
+}
 
 function integer(value) {
   checkSdk(value <= BigInt(Number.MAX_SAFE_INTEGER), 'imprecise address');
@@ -231,9 +254,13 @@ async function deployServer({ attachment: a, image, index, sources, port }) {
 
   async function status() {
     const data = await work.readOwned(work.base + 0x4000, 64);
+    // Offsets follow ServerConfig in native.h.
     return {
       state: data.readUInt32LE(16),
       result: data.readUInt32LE(20),
+      errno: Number(data.readBigUInt64LE(48)),
+      ip: [...data.subarray(56, 60)].join('.'),
+      phase: data.readUInt32LE(60),
     };
   }
 
@@ -274,15 +301,17 @@ async function deployServer({ attachment: a, image, index, sources, port }) {
       base: a.live.sdk,
     });
 
-    const functions = Buffer.alloc(15 * 8);
-    Object.keys(wanted).forEach((name, i) => {
-      functions.writeBigUInt64LE(BigInt(symbols[name]), i * 8);
+    const addresses = {
+      ...symbols,
+      ipc: a.live.sdk + sdk.send.offset,
+      close_handle: a.live.sdk + sdk.close.offset,
+      thread_create: a.live.sdk + threadCode.create.offset,
+      thread_join: a.live.sdk + threadCode.join.offset,
+    };
+    const functions = Buffer.alloc(FUNCTION_TABLE.length * 8);
+    FUNCTION_TABLE.forEach((name, i) => {
+      functions.writeBigUInt64LE(BigInt(addresses[name]), i * 8);
     });
-
-    functions.writeBigUInt64LE(BigInt(a.live.sdk + sdk.send.offset), 11 * 8);
-    functions.writeBigUInt64LE(BigInt(a.live.sdk + sdk.close.offset), 12 * 8);
-    functions.writeBigUInt64LE(BigInt(a.live.sdk + threadCode.create.offset), 13 * 8);
-    functions.writeBigUInt64LE(BigInt(a.live.sdk + threadCode.join.offset), 14 * 8);
 
     const configuration = encodeConfiguration({
       base: work.base,
@@ -348,14 +377,13 @@ async function deployServer({ attachment: a, image, index, sources, port }) {
 
       if (current.state === 1) break;
 
-      if (current.state === 3) {
-        throw new Error('Native server startup failed: 0x' + current.result.toString(16));
-      }
+      if (current.state === 3) throw startupError(current, port);
 
       await new Promise((r) => setTimeout(r, 50));
     }
 
-    return { close };
+    // 0.0.0.0 means the console found no route; the caller falls back to a placeholder.
+    return { close, address: current.ip === '0.0.0.0' ? undefined : current.ip };
   } catch (error) {
     await cleanup([close], error);
   }

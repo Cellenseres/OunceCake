@@ -49,4 +49,11 @@ fi
 exec 3>&-
 wait "$HARNESS" || STATUS=1
 cat "$WORK/harness.log"
+
+# The run above leaves server-closed connections in TIME_WAIT; restarting on the same port must still work.
+if "$WORK/harness" "$PORT" "$WORK/manifest-restart.tsv" < /dev/null > "$WORK/restart.log" 2>&1; then
+    echo "restart on port $PORT: ok"
+else
+    echo "FAIL: restart on port $PORT"; cat "$WORK/restart.log"; STATUS=1
+fi
 exit "$STATUS"

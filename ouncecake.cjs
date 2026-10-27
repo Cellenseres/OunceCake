@@ -136,8 +136,7 @@ async function main(argv = process.argv.slice(2)) {
     const prepared = await prepareGame({ attachment, title, shouldStop });
     if (shouldStop()) return;
     server = await deployServer({ attachment, image, ...prepared, port });
-    console.log('Serving on http://<switch 2 ip>:' + port + '/ (browser, curl, aria2c, rclone)');
-    console.log('WebDAV: Finder Cmd-K or `rclone mount :webdav:` with the same URL (read-only)');
+    console.log('Serving on http://' + (server.address || '<console ip>') + ':' + port + '/ (HTTP + read-only WebDAV)');
     console.log('Ctrl-C to stop the server');
     
     while (!shouldStop()) {

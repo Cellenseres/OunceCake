@@ -81,6 +81,7 @@ class Checker:
             ('bytes=-10', 206, size - 10, 10),
             ('bytes=99990-', 206, 99990, size - 99990),
             ('bytes=0-999999', 206, 0, size),
+            ('bytes=0-18446744073709551615', 206, 0, size),  # last + 1 would wrap.
             ('bytes=5-2', 200, 0, size),  # Invalid: ignored.
             ('bytes=0-1,5-6', 200, 0, size),  # Multiple ranges: ignored.
             ('items=0-1', 200, 0, size),
