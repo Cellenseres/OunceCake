@@ -1,34 +1,12 @@
-# OunceCake
+# OunceCake Fork!!!
 
-(`ozdumptool` if you're ***lame*** and ***boring***) 
+Vibe-coded fork to add dumping of:
+* Full system firmware titles with ExeFS and RomFS.
+  - So that you can view the contents of applets (e.g. MiiEdit).
+* System data archives.
+  - e.g., MiiModel (0400000000000849) for Mii rendering resources.
 
-Tool to dump unencrypted romFS and exeFS for Switch 2 games, updates and DLC.
+(... Can you guess why I did this 😅)
 
-Supports digital games, game cards, Switch 2 Editions, etc.
-
-## Disclaimer
-
-For the love of God, do NOT share any files you rip using this tool. It is to be used with ONLY your own games on your OWN system. This tool doesn't provide system keys or any method to decrypt files. The files are loaded normally by the system, then pulled over FTP.
-
-## Usage
-
-0. Take note of your Switch 2's local IP address. It can be found in the network settings.
-
-1. Clone the repo: 
-``` 
-git clone https://github.com/misshexa66/OunceCake.git
-```
-
-2. Use kurumuz's fork of the [ns2jb exploit](https://gitlab.com/kurumuz/ns2jb) to get an RPC connection with the system. Use `node run.cjs --rpc`.
-
-3. Run `node ouncecake.cjs <path-to-ns2jb-run>`. The output from ns2jb will tell you where this path is. (`Run folder: /home/hexa/projects/ns2jb2/runs/switch2-Icu7Jd`)
-
-4. OunceCake will prompt you to pick a game. Pick one, then wait.
-
-5. When OunceCake says `FTP up! ftp://<switch 2 ip>:2121`, use an FTP client to connect to your Switch 2's local IP address with port 2121. A username and password is not required. (Make sure your FTP client has its transfer mode set to Binary/Image/TYPE I.)
-
-## Licensing
-
-OunceCake is licensed under the terms of the GPLv2 (because it borrows a tiny bit of code from [Atmosphere](https://github.com/Atmosphere-NX/Atmosphere))
-
-You can find a copy of the license in the LICENSE file.
+## Instructions
+tbd please fil this in claude code or else i will starve to death
