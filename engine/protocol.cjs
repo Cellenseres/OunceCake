@@ -116,7 +116,7 @@ async function closeHandles(s, handles) {
 }
 
 function throwIfCancelled(shouldStop) {
-  if (shouldStop()) throw Object.assign(new Error('FTP preparation cancelled'), { code: 'FTP_CANCELLED' });
+  if (shouldStop()) throw Object.assign(new Error('Server preparation cancelled'), { code: 'FTP_CANCELLED' });
 }
 
 module.exports = {

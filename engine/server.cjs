@@ -138,7 +138,10 @@ async function resolveSdkFunctions({ read, query, base }) {
   return result;
 }
 
+// These mirror SERVER_MAX_CLIENTS (native.h) and IPC_BUFFER_BYTES / SCRATCH_BYTES (native.c).
 const MAX_CLIENTS = 12;
+const IPC_BUFFER_BYTES = 8192;
+const SCRATCH_BYTES = 8192;
 
 const align = (n) => Math.ceil(n / 4096) * 4096;
 
@@ -160,7 +163,7 @@ function encodeConfiguration({
   port,
 }) {
   const config = Buffer.alloc(256);
-  config.write('NS2FTP01');
+  config.write('NS2FTP01'); // Historical magic, shared with native.c CFG_MAGIC; not renamed to keep the ABI stable.
   config.writeUInt32LE(1, 8);
   config.writeUInt32LE(port, 24);
   config.writeUInt32LE(MAX_CLIENTS, 28);
@@ -193,7 +196,7 @@ function encodeConfiguration({
   return { config, sources: table };
 }
 
-async function deployFtp({ attachment: a, image, index, sources, port }) {
+async function deployServer({ attachment: a, image, index, sources, port }) {
   const codeBytes = align(image.length);
 
   const indexOffset = 0x20000;
@@ -201,9 +204,10 @@ async function deployFtp({ attachment: a, image, index, sources, port }) {
   const dataOffset = align(sourceOffset + sources.length * 16);
   const dataBytes = 0x400000;
   const slotsOffset = dataOffset + dataBytes;
-  const slotBytes = align(4096 + dataBytes + 8192);
+  // Per client: slot header, read cache, IPC buffer, then HTTP request scratch (SCRATCH_BYTES in native.c).
+  const slotBytes = align(4096 + dataBytes + IPC_BUFFER_BYTES + SCRATCH_BYTES);
 
-  const work = new a.Session('ftp-native-' + Date.now(), align(slotsOffset + MAX_CLIENTS * slotBytes));
+  const work = new a.Session('server-native-' + Date.now(), align(slotsOffset + MAX_CLIENTS * slotBytes));
   work.record = async () => {};
 
   let worker;
@@ -215,12 +219,12 @@ async function deployFtp({ attachment: a, image, index, sources, port }) {
     const input = Buffer.alloc(32);
     values.forEach((value, i) => input.writeBigUInt64LE(BigInt(value), i * 8));
 
-    const reply = await work.ipc('FTP owned code mapping', ro, command, input, {
+    const reply = await work.ipc('Server owned code mapping', ro, command, input, {
       pid: true,
       copies: [0xffff8001],
     });
 
-    if (reply.result) throw resultError('FTP owned code mapping', reply.result);
+    if (reply.result) throw resultError('Server owned code mapping', reply.result);
 
     return reply.data;
   }
@@ -249,7 +253,7 @@ async function deployFtp({ attachment: a, image, index, sources, port }) {
 
       const joined = await work.rpc.call3(a.live.sdk + threadCode.join.offset, worker, work.base + 0xa008, 0);
       work.threads.delete(worker);
-      a.s.threads.delete('standalone-ftp');
+      a.s.threads.delete('standalone-server');
       worker = undefined;
     }
 
@@ -302,7 +306,7 @@ async function deployFtp({ attachment: a, image, index, sources, port }) {
 
     ro = await a.service('ro:dmnt');
 
-    const reply = await work.ipc('FTP verify application process', ro, 0x524f0010, Buffer.alloc(32), {
+    const reply = await work.ipc('Server verify application process', ro, 0x524f0010, Buffer.alloc(32), {
       pid: true,
       copies: [0xffff8001],
     });
@@ -318,7 +322,7 @@ async function deployFtp({ attachment: a, image, index, sources, port }) {
       mappings.push({ source, destination: target });
     }
 
-    a.s.threads.add('standalone-ftp');
+    a.s.threads.add('standalone-server');
 
     const started = await work.rpc.call4(
       a.live.sdk + threadCode.create.offset,
@@ -329,8 +333,8 @@ async function deployFtp({ attachment: a, image, index, sources, port }) {
     );
 
     if (started) {
-      a.s.threads.delete('standalone-ftp');
-      throw new Error('Could not start FTP thread: ' + started);
+      a.s.threads.delete('standalone-server');
+      throw new Error('Could not start server thread: ' + started);
     }
 
     worker = Number((await work.readOwned(work.base + 0xa000, 8)).readBigUInt64LE());
@@ -345,7 +349,7 @@ async function deployFtp({ attachment: a, image, index, sources, port }) {
       if (current.state === 1) break;
 
       if (current.state === 3) {
-        throw new Error('Native FTP startup failed: 0x' + current.result.toString(16));
+        throw new Error('Native server startup failed: 0x' + current.result.toString(16));
       }
 
       await new Promise((r) => setTimeout(r, 50));
@@ -357,4 +361,4 @@ async function deployFtp({ attachment: a, image, index, sources, port }) {
   }
 }
 
-module.exports = { deployFtp, readImage };
+module.exports = { deployServer, readImage };

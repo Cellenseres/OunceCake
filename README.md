@@ -56,6 +56,34 @@ Each dumped title lands under `<out>/<titleId>/` as:
 Ctrl-C is safe: in-flight writes complete, the FS handles get closed, and
 the journal is flushed with whatever was captured so far.
 
+### Serving a game over HTTP / WebDAV
+
+```sh
+node ouncecake.cjs <run-directory> [title-id] [--port 8080]
+```
+
+This injects a small read-only HTTP/1.1 server into the console and prints
+`http://<switch 2 ip>:8080/`. Any HTTP client works:
+
+* **Browser / `wget -r` / `aria2c`**: directories are plain HTML indexes.
+* **`curl`**: `Range` requests are supported, so `curl -C -` resumes.
+* **rclone** (best for whole dumps, any OS):
+  `rclone copy --transfers 4 --webdav-url http://<ip>:8080/ :webdav: ./dump`
+* **Finder**: Cmd-K → `http://<ip>:8080/` mounts it read-only (WebDAV).
+* **Windows Explorer** can map it as a WebDAV drive, but its WebClient
+  service refuses files over 50 MB by default (`FileSizeLimitInBytes`).
+  Use rclone, aria2c or curl instead.
+
+Up to 12 connections are served at once; idle keep-alive connections give
+their slot up when another client is waiting.
+
+### Rebuilding the native server
+
+`npm run build` compiles `engine/oz-code/native.c` with clang + lld (no
+cross-GCC needed; `brew install llvm lld` on macOS). `npm run test:native`
+runs it on the host under ASan/UBSan against fake storage and checks HTTP,
+WebDAV and rclone behaviour (macOS only).
+
 ### Common hiccups
 
 * **A title logs "no RomFS section (0x7d202)"** — expected for some

@@ -5,15 +5,15 @@ const { titleId, withCleanup } = require('./engine/protocol.cjs');
 const { attachGame } = require('./engine/session.cjs');
 const { discoverGames } = require('./engine/content.cjs');
 const { prepareGame } = require('./engine/mounts.cjs');
-const { deployFtp, readImage } = require('./engine/ftp.cjs');
+const { deployServer, readImage } = require('./engine/server.cjs');
 
-const USAGE = 'Usage: node poundcake.cjs <run-directory> [title-id] [--port 2121]\n' +
+const USAGE = 'Usage: node ouncecake.cjs <run-directory> [title-id] [--port 8080]\n' +
               'Use the run dir given by ns2jb (Run folder: <whatever>)\n' +
               'You can also provide a title ID to skip the selection menu and just mount a specific game\n';
 
 function getArgs(argv) {
   const args = [];
-  let port = 2121;
+  let port = 8080;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -135,8 +135,9 @@ async function main(argv = process.argv.slice(2)) {
     }
     const prepared = await prepareGame({ attachment, title, shouldStop });
     if (shouldStop()) return;
-    server = await deployFtp({ attachment, image, ...prepared, port });
-    console.log('FTP up! ftp://<switch 2 ip>:' + port);
+    server = await deployServer({ attachment, image, ...prepared, port });
+    console.log('Serving on http://<switch 2 ip>:' + port + '/ (browser, curl, aria2c, rclone)');
+    console.log('WebDAV: Finder Cmd-K or `rclone mount :webdav:` with the same URL (read-only)');
     console.log('Ctrl-C to stop the server');
     
     while (!shouldStop()) {
