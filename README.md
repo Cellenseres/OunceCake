@@ -1,16 +1,22 @@
 # OunceCake Fork!!!
 
-Vibe-coded fork to add dumping of:
-* Full system firmware titles with ExeFS and RomFS.
+Vibe-coded fork. What's different from upstream:
+
+* Dumping of full system firmware titles with ExeFS and RomFS.
   - So that you can view the contents of applets (e.g. MiiEdit).
-* System data archives.
+* Dumping of system data archives.
   - e.g., MiiModel (0400000000000849) for Mii rendering resources.
+* The on-console game server speaks **HTTP + read-only WebDAV instead of FTP**.
+  - Browsers, curl, aria2c, rclone, and OS file managers can all read it.
+  - It prints the console's actual address, and defaults to port 8080 (was 2121).
+* The native server builds with **clang + lld** on any OS (was Linux-only
+  cross-GCC), and has a host test harness.
 
 (... Can you guess why I did this 😅)
 
 ## Instructions
 
-> _This section was written by **Claude Opus 4.7** (because an-Throb-bic kept blocking this task on the newer models)_
+> _This section was written by **Claude Opus 4.7** and **Claude Opus 5.5** (because an-Throb-bic kept blocking this task on the newer models)_
 
 ### Prerequisites
 
@@ -63,7 +69,7 @@ node ouncecake.cjs <run-directory> [title-id] [--port 8080]
 ```
 
 This injects a small read-only HTTP/1.1 server into the console and prints
-`http://<switch 2 ip>:8080/`. Any HTTP client works:
+its address, e.g. `Serving on http://192.168.1.50:8080/`. Any HTTP client works:
 
 * **Browser / `wget -r` / `aria2c`**: directories are plain HTML indexes.
 * **`curl`**: `Range` requests are supported, so `curl -C -` resumes.
@@ -89,6 +95,11 @@ WebDAV and rclone behaviour (macOS only).
 
 * **A title logs "no RomFS section (0x7d202)"** — expected for some
   SystemProgram titles that are code-only. Not an error.
+* **"Port 8080 is already in use on the console"** — another server (or
+  something else) still holds that port. Pick another `--port`.
+* **"Native server startup failed at …"** — names the step that broke
+  (configuration, file index, `socket()`, `bind()`, `listen()`) and the
+  errno. Worth reporting with the title ID.
 * **A title fails with `0x7d802`** — needs an ES license to open. The
   dumper already tries `prepareInstalledLicense`; if it still fails the
   license isn't installed on this console. Skip it or install the title
