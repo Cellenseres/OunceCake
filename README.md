@@ -10,13 +10,10 @@ Vibe-coded fork to add dumping of:
 
 ## Instructions
 
-> _This section was written by **Claude Opus 4.7** (via Claude Code), which also
-> implemented the firmware/system-data dumper. If something here is wrong,
-> blame the model, not the author._
+> _This section was written by **Claude Opus 4.7** (because an-Throb-bic kept blocking this task on the newer models)_
 
 ### Prerequisites
 
-* Node.js ≥ 18 on the host.
 * A Switch 2 running the kurumuz fork of **ns2jb** (`node run.cjs --rpc`), on
   the same machine or reachable from it. The `--rpc` flag is important: it
   tells ns2jb to hold the exploit session open after the user payload runs,
@@ -26,20 +23,6 @@ Vibe-coded fork to add dumping of:
   path as its first argument; it reads `switch2/current-acquisition.json`,
   `switch2/ro/root/current-root.json`, and
   `switch2/ro/<session>-loader-root-copy.json` out of it.
-
-### Game dumping (the original flow)
-
-Mount an installed game over FTP and pull it with any FTP client:
-
-```sh
-node ouncecake.cjs <run-directory>              # interactive title picker
-node ouncecake.cjs <run-directory> <title-id>   # skip the picker
-node ouncecake.cjs <run-directory> --port 2121  # change the FTP port
-```
-
-The script prints a `ftp://host:port` URL. Connect, grab what you want
-(ExeFS + RomFS appear as plain directories), disconnect. Ctrl-C the script
-to release the mount.
 
 ### Firmware + system data dumping (the new flow)
 
@@ -75,13 +58,6 @@ the journal is flushed with whatever was captured so far.
 
 ### Common hiccups
 
-* **"could not find current-acquisition.json"** — the run directory you
-  passed isn't an ns2jb run dir, or ns2jb hasn't finished its exploit yet.
-  Wait until ns2jb prints `Run folder: …` and the console UI is responsive.
-* **"EHOSTUNREACH" / "ECONNREFUSED" partway through** — the ns2jb `--rpc`
-  hold dropped (console slept, got rebooted, or you quit the ns2jb process).
-  Re-run `node run.cjs --rpc` on ns2jb; you'll get a fresh run dir to point
-  OunceCake at.
 * **A title logs "no RomFS section (0x7d202)"** — expected for some
   SystemProgram titles that are code-only. Not an error.
 * **A title fails with `0x7d802`** — needs an ES license to open. The
