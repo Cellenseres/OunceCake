@@ -1,32 +1,37 @@
 # OunceCake Fork!!!
 
-Vibe-coded fork. What's different from upstream:
+It adds the following features to [the original](https://github.com/misshexa66/OunceCake):
 
-* Dumping of full system firmware titles with ExeFS and RomFS.
+* **Replaces the FTP file server with HTTP/WebDAV**.
+  - Allows you to open the contents of any title in either a web browser, mount it in your OS with WebDAV, use wget, etc.
+  - Possibly faster than FTP but I haven't actually confirmed this bc I never used the FTP version Lol
+
+![](browser-demo.jpg)
+
+* Can dump **full system firmware titles** with RomFS as well as ExeFS.
   - So that you can view the contents of applets (e.g. MiiEdit).
-* Dumping of system data archives.
+* Dumping of **system data archives**.
   - e.g., MiiModel (0400000000000849) for Mii rendering resources.
-* The on-console game server speaks **HTTP + read-only WebDAV instead of FTP**.
-  - Browsers, curl, aria2c, rclone, and OS file managers can all read it.
-  - It prints the console's actual address, and defaults to port 8080 (was 2121).
-* The native server builds with **clang + lld** on any OS (was Linux-only
-  cross-GCC), and has a host test harness.
 
-(... Can you guess why I did this 😅)
+(... Can you guess why I did this fork to begin with 😅)
+
+* Builds the native server with clang/lld instead of gcc.
+  - Should be hopefully more cross-platform.
+  - Also has a vibe-coded "test harness" meant for the macOS host. This can probably be made more portable.
 
 ## Instructions
 
-> _This section was written by **Claude Opus 4.7** and **Claude Opus 5.5** (because an-Throb-bic kept blocking this task on the newer models)_
+> _This section was written by Claude along with the rest of the code, if you can make it suck less feel free to open a PR_
 
 ### Prerequisites
 
-* A Switch 2 running the kurumuz fork of **ns2jb** (`node run.cjs --rpc`), on
-  the same machine or reachable from it. The `--rpc` flag is important: it
-  tells ns2jb to hold the exploit session open after the user payload runs,
-  so OunceCake can reattach over the retained FS/Loader roots.
+* A Switch 2 running the kurumuz fork of **ns2jb** (`node run.cjs --rpc`), on the same machine or reachable from it.
+  - The `--rpc` flag is important: it tells ns2jb to hold the exploit session open after the user payload runs...
+  - ... so OunceCake can reattach over the retained FS/Loader roots.
 * The run directory ns2jb prints at the end of its exploit
-  (something like `.../ns2jb/runs/switch2-XxYyZz/`). OunceCake takes that
-  path as its first argument; it reads `switch2/current-acquisition.json`,
+  (something like `.../ns2jb/runs/switch2-XxYyZz/`).
+  - OunceCake takes that path as its first argument.
+  - Specifically, it reads: `switch2/current-acquisition.json`,
   `switch2/ro/root/current-root.json`, and
   `switch2/ro/<session>-loader-root-copy.json` out of it.
 
@@ -89,7 +94,7 @@ their slot up when another client is waiting.
 `npm run build` compiles `engine/oz-code/native.c` with clang + lld (no
 cross-GCC needed; `brew install llvm lld` on macOS). `npm run test:native`
 runs it on the host under ASan/UBSan against fake storage and checks HTTP,
-WebDAV and rclone behaviour (macOS only).
+WebDAV and rclone behavior (macOS only).
 
 ### Common hiccups
 
