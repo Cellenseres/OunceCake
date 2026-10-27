@@ -3,6 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const {
   success,
+  packet,
   pathRequest,
   closeHandles,
   throwIfCancelled,
@@ -49,9 +50,10 @@ async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
 }
 
-/// Open a RomFS IStorage for an NCA described by `source`, using the retained
-/// Loader root's `OpenDataStorageByPath` (command 206, section type 1 = RomFS).
-async function openRomfsStorage(attachment, source) {
+/// Open a RomFS IStorage for a Program NCA described by `source`, using the
+/// retained FS root's `OpenDataStorageByPath` (command 206, section type 1 =
+/// RomFS). This is the path for SystemProgram titles.
+async function openProgramRomfsStorage(attachment, source) {
   const { s, root, domain } = attachment;
   const filename = Buffer.alloc(0x301);
   filename.write(source.contentPath);
@@ -72,6 +74,31 @@ async function openRomfsStorage(attachment, source) {
 
   const handle = domain.oneHandle(reply);
   const sizeReply = success(await s.ipc('Firmware storage size', handle, 4), 'Firmware storage size');
+  return { handle, size: Number(sizeReply.data.readBigUInt64LE()) };
+}
+
+/// Open a Data NCA's RomFS IStorage by DataId. Uses `OpenDataStorageByDataId`
+/// (command 202 on IFileSystemProxy): the correct path for SystemData archives
+/// since OpenDataStorageByPath only accepts Program NCAs on this console.
+async function openDataIdStorage(attachment, title, storage) {
+  const { s, root, domain } = attachment;
+
+  // Raw input layout: storageId (u8 @ 0) + 7 bytes pad + dataId (u64 LE @ 8).
+  const input = Buffer.alloc(16);
+  input[0] = storage;
+  input.writeBigUInt64LE(BigInt('0x' + title), 8);
+
+  const reply = await domain.send(
+    s,
+    'OpenDataStorageByDataId',
+    root,
+    packet(202, input),
+  );
+
+  if (reply.result) throw resultError('OpenDataStorageByDataId', reply.result);
+
+  const handle = domain.oneHandle(reply);
+  const sizeReply = success(await s.ipc('System data storage size', handle, 4), 'System data storage size');
   return { handle, size: Number(sizeReply.data.readBigUInt64LE()) };
 }
 
@@ -173,14 +200,16 @@ async function streamRomfsExtent(attachment, storageHandle, offset, size, outFil
   }
 }
 
-/// Dump a RomFS section for `source` into `<outputDir>/romfs/`. Returns a
-/// manifest, or `null` if the NCA has no RomFS section.
-async function dumpRomfs({ attachment, source, outputDir, cancel, titleForLicense }) {
+/// Dump a RomFS section into `<outputDir>/romfs/` using `openStorage` as the
+/// mount constructor. Returns a manifest, or `null` if the NCA has no RomFS
+/// section. If `source` is supplied and the server requests a license, falls
+/// back through `prepareInstalledLicense` and retries once.
+async function dumpRomfs({ attachment, openStorage, outputDir, cancel, source, titleForLicense }) {
   cancel();
   let mount;
 
   try {
-    mount = await openRomfsStorage(attachment, source);
+    mount = await openStorage();
   } catch (error) {
     const code = error.nativeResult?.canonical;
 
@@ -189,11 +218,11 @@ async function dumpRomfs({ attachment, source, outputDir, cancel, titleForLicens
       return null;
     }
 
-    if (code === RESULT_LICENSE_NEEDED) {
+    if (code === RESULT_LICENSE_NEEDED && source) {
       console.log('  license needed, preparing...');
       await prepareInstalledLicense({ ...attachment, title: titleForLicense, source });
       cancel();
-      mount = await openRomfsStorage(attachment, source);
+      mount = await openStorage();
     } else {
       throw error;
     }
@@ -379,7 +408,12 @@ async function dumpFirmware({
 
     try {
       romfs = await dumpRomfs({
-        attachment, source, outputDir, cancel, titleForLicense: title,
+        attachment,
+        openStorage: () => openProgramRomfsStorage(attachment, source),
+        outputDir,
+        cancel,
+        source,
+        titleForLicense: title,
       });
     } catch (error) {
       console.log('  RomFS failed: ' + error.message);
@@ -412,7 +446,12 @@ async function dumpFirmware({
 
     try {
       romfs = await dumpRomfs({
-        attachment, source, outputDir, cancel, titleForLicense: title,
+        attachment,
+        openStorage: () => openDataIdStorage(attachment, title, record.storage),
+        outputDir,
+        cancel,
+        source,
+        titleForLicense: title,
       });
     } catch (error) {
       console.log('  RomFS failed: ' + error.message);
