@@ -1,111 +1,47 @@
-# OunceCake Fork!!!
+# OunceCake - Cellenseres
 
-It adds the following features to [the original](https://github.com/misshexa66/OunceCake):
+Private variant of [ariankordi/OunceCake](https://github.com/ariankordi/OunceCake), based on [misshexa66/OunceCake](https://github.com/misshexa66/OunceCake). Upstream history, attribution and the GPL-2.0 license are retained.
 
-* **Replaces the FTP file server with HTTP/WebDAV**.
-  - Allows you to open the contents of any title in either a web browser, mount it in your OS with WebDAV, use wget, etc.
-  - Possibly faster than FTP but I haven't actually confirmed this bc I never used the FTP version Lol
+The upstream HTTP/WebDAV server exposes game ExeFS and RomFS and supports firmware/system-data exports. This variant adds installed native-title ELicense preparation, base-only views and raw NCA export.
 
-![](browser-demo.jpg)
+## Requirements
 
-* Can dump **full system firmware titles** with RomFS as well as ExeFS.
-  - So that you can view the contents of applets (e.g. MiiEdit).
-* Dumping of **system data archives**.
-  - e.g., MiiModel (0400000000000849) for Mii rendering resources.
+Use Node.js 22 or newer and an already held run from [our ns2jb variant](https://github.com/Cellenseres/ns2jb). No npm dependencies are needed. Keep SmileBASIC and the runner open while OunceCake is attached. OunceCake does not start a bootstrap; the upstream ns2jb acquisition uses temporary save files. Review the [console storage policy](docs/CONSOLE-ACCESS.md).
 
-(... Can you guess why I did this fork to begin with 😅)
-
-* Builds the native server with clang/lld instead of gcc.
-  - Should be hopefully more cross-platform.
-  - Also has a vibe-coded "test harness" meant for the macOS host. This can probably be made more portable.
-
-## Instructions
-
-> _This section was written by Claude along with the rest of the code, if you can make it suck less feel free to open a PR_
-
-### Prerequisites
-
-* A Switch 2 running the kurumuz fork of **ns2jb** (`node run.cjs --rpc`), on the same machine or reachable from it.
-  - The `--rpc` flag is important: it tells ns2jb to hold the exploit session open after the user payload runs...
-  - ... so OunceCake can reattach over the retained FS/Loader roots.
-* The run directory ns2jb prints at the end of its exploit
-  (something like `.../ns2jb/runs/switch2-XxYyZz/`).
-  - OunceCake takes that path as its first argument.
-  - Specifically, it reads: `switch2/current-acquisition.json`,
-  `switch2/ro/root/current-root.json`, and
-  `switch2/ro/<session>-loader-root-copy.json` out of it.
-
-### Firmware + system data dumping (the new flow)
-
-Dump SystemProgram titles (applets like MiiEdit — ExeFS **and** RomFS) and
-SystemData archives (MiiModel, SharedFont, dictionaries, …) straight to
-disk:
+## Browse a title
 
 ```sh
-# Dump everything (both kinds) into <run>/firmware-dump/.
-node firmware-dump.cjs <run-directory>
-
-# Only one kind.
-node firmware-dump.cjs <run-directory> --include-programs
-node firmware-dump.cjs <run-directory> --include-data
-
-# A specific title or two (16-hex-digit title IDs, comma-separated).
-node firmware-dump.cjs <run-directory> --titles 0100000000001009
-node firmware-dump.cjs <run-directory> --titles 0100000000001009,0100000000000810
-
-# Pick where it lands.
-node firmware-dump.cjs <run-directory> --out /path/to/archive
+node ouncecake.cjs <held-run-directory> [title-id] [--port 8080]
 ```
 
-Each dumped title lands under `<out>/<titleId>/` as:
-
-* `exefs/` — `main`, `main.npdm`, … (SystemProgram only).
-* `romfs/` — the full RomFS tree, with original paths preserved.
-* `firmware-dump.json` at the output root — per-file SHA-256 journal so you
-  can diff two dumps or verify an archive later.
-
-Ctrl-C is safe: in-flight writes complete, the FS handles get closed, and
-the journal is flushed with whatever was captured so far.
-
-### Serving a game over HTTP / WebDAV
+For a native digital base title:
 
 ```sh
-node ouncecake.cjs <run-directory> [title-id] [--port 8080]
+node ouncecake.cjs <held-run-directory> 040029A01D3E0000 --base-only --port 8080
 ```
 
-This injects a small read-only HTTP/1.1 server into the console and prints
-its address, e.g. `Serving on http://192.168.1.50:8080/`. Any HTTP client works:
+Open the printed HTTP address. `/base/exefs/` contains CodeFS files; `/base/romfs/` contains the RomFS tree. The same paths support read-only WebDAV. `--base-only` omits update and DLC discovery. Without a title ID, the CLI offers title selection.
 
-* **Browser / `wget -r` / `aria2c`**: directories are plain HTML indexes.
-* **`curl`**: `Range` requests are supported, so `curl -C -` resumes.
-* **rclone** (best for whole dumps, any OS):
-  `rclone copy --transfers 4 --webdav-url http://<ip>:8080/ :webdav: ./dump`
-* **Finder**: Cmd-K → `http://<ip>:8080/` mounts it read-only (WebDAV).
-* **GNOME Files**: Other Locations → `dav://<ip>:8080/`.
-* **Windows Explorer** can map it as a WebDAV drive, but its WebClient
-  service refuses files over 50 MB by default (`FileSizeLimitInBytes`).
-  Use rclone, aria2c or curl instead.
+ELicense preparation uses the content's FS606 RightsId and installed owner accounts. The rights context stays open throughout serving. No separate registration script or plaintext titlekey is needed. A prior FS206 RomFS read succeeded; complete native-title ExeFS and HTTP serving still require the [manual checks](docs/VALIDATION.md).
 
-Up to 12 connections are served at once; idle keep-alive connections give
-their slot up when another client is waiting.
+## Export raw NCAs
 
-### Rebuilding the native server
+```sh
+node ouncecake.cjs <held-run-directory> <title-id> --nca --out ./nca-dump
+```
 
-`npm run build` compiles `engine/oz-code/native.c` with clang + lld (no
-cross-GCC needed; `brew install llvm lld` on macOS). `npm run test:native`
-runs it on the host under ASan/UBSan against fake storage and checks HTTP,
-WebDAV and rclone behavior (macOS only).
+Add `--skip-program` to omit the Program NCA. These files remain encrypted. Existing output files are preserved; incomplete captures have a `.partial` suffix. Ctrl-C stops before the next read and releases owned handles.
 
-### Common hiccups
+## Export firmware titles
 
-* **A title logs "no RomFS section (0x7d202)"** — expected for some
-  SystemProgram titles that are code-only. Not an error.
-* **"Port 8080 is already in use on the console"** — another server (or
-  something else) still holds that port. Pick another `--port`.
-* **"Native server startup failed at …"** — names the step that broke
-  (configuration, file index, `socket()`, `bind()`, `listen()`) and the
-  errno. Worth reporting with the title ID.
-* **A title fails with `0x7d802`** — needs an ES license to open. The
-  dumper already tries `prepareInstalledLicense`; if it still fails the
-  license isn't installed on this console. Skip it or install the title
-  first.
+```sh
+node firmware-dump.cjs <held-run-directory> --out ./firmware-dump
+```
+
+Use `--include-programs`, `--include-data` or `--titles <id,id>` to select content. Outputs and journals are written to the PC.
+
+## Native server build
+
+`npm run build` uses clang and lld. The upstream macOS harness remains under `engine/oz-code/test/` and runs with `npm run test:native`. Local checks stay untracked.
+
+See [provenance](docs/PROVENANCE.md) for source revisions and validation limits.
