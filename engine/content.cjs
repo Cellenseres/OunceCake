@@ -171,19 +171,31 @@ async function resolveContent({ s, domain, service, title, storage, update, dlc,
 
   return withCleanup(async () => {
     const ncm = await service('ncm');
-    const database = own(
-      success(
-        await s.ipc('OpenContentMetaDatabase', ncm, 5, Buffer.from([storage])),
-        'OpenContentMetaDatabase',
-      ),
-    );
     const selected = dlc || update;
     const contentTitle = selected ? selected.contentTitle : title;
-    const latest = success(
-      await s.ipc('GetLatestContentMetaKey', database, 6, idBytes(contentTitle)),
-      'GetLatestContentMetaKey',
-    );
-    const key = Buffer.from(latest.data.subarray(0, 16));
+    // Search installed storages only when no storage was selected.
+    const candidates = [...new Set(storage === undefined || storage === null ?
+      [4, 5, 2, 3] : [storage])];
+    let database, key, usedStorage, failure;
+    for (const candidate of candidates) {
+      const opened = await s.ipc('OpenContentMetaDatabase storage ' + candidate,
+        ncm, 5, Buffer.from([candidate]));
+      if (opened.result && inactive.has(opened.result & 0x3fffff)) continue;
+      const handle = own(success(opened, 'OpenContentMetaDatabase'));
+      const latest = await s.ipc('GetLatestContentMetaKey storage ' + candidate, handle, 6,
+        idBytes(contentTitle));
+      if (!latest.result) {
+        database = handle;
+        usedStorage = candidate;
+        key = Buffer.from(latest.data.subarray(0, 16));
+        break;
+      }
+      if ((latest.result & 0x3fffff) !== 0xe05) throw resultError('GetLatestContentMetaKey', latest.result);
+      failure = latest;
+    }
+    if (usedStorage === undefined)
+      throw resultError('GetLatestContentMetaKey for ' + contentTitle, failure?.result || 0xe05);
+    storage = usedStorage;
 
     if (dlc || update) {
       const owner = success(
@@ -452,7 +464,7 @@ async function discoverGames({ s, root, domain, service, filesystem, shouldStop 
 module.exports = {
   discoverGames, discoverUpdates, discoverDlc,
   discoverSystemPrograms, discoverSystemData,
-  resolveProgramContent, resolveDlcContent, resolveSystemDataContent, findOriginalContent,
+  resolveContent, resolveProgramContent, resolveControlContent, resolveDlcContent, resolveSystemDataContent, findOriginalContent,
   isInstalledUpdate, programMatchesApplication,
   USER_STORAGES, SYSTEM_STORAGES,
 };
