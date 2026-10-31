@@ -7,13 +7,15 @@ const { discoverGames } = require('./engine/content.cjs');
 const { prepareGame } = require('./engine/mounts.cjs');
 const { deployServer, readImage } = require('./engine/server.cjs');
 
-const USAGE = 'Usage: node ouncecake.cjs <run-directory> [title-id] [--port 8080]\n' +
+const USAGE = 'Usage: node ouncecake.cjs <run-directory> [title-id] [--port 8080] [--base-only]\n' +
               'Use the run dir given by ns2jb (Run folder: <whatever>)\n' +
-              'You can also provide a title ID to skip the selection menu and just mount a specific game\n';
+              'You can also provide a title ID to skip the selection menu and just mount a specific game\n' +
+              '--base-only serves base/exefs and base/romfs without preparing updates or DLC\n';
 
 function getArgs(argv) {
   const args = [];
   let port = 8080;
+  let baseOnly = false;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -29,6 +31,8 @@ function getArgs(argv) {
       }
       continue;
     }
+
+    if (a === '--base-only') {baseOnly = true; continue;}
 
     if (a.startsWith('--')) {
       throw new Error('Unknown option: ' + a + '\n' + USAGE);
@@ -46,7 +50,7 @@ function getArgs(argv) {
   }
 
   const title = args.length === 2 ? titleId(args[1]) : undefined;
-  return { run: path.resolve(args[0]), title, port };
+  return { run: path.resolve(args[0]), title, port, baseOnly };
 }
 
 const storageNames = { 2: 'Game card', 4: 'Internal', 5: 'SD' };
@@ -133,7 +137,7 @@ async function main(argv = process.argv.slice(2)) {
       if (!selected || shouldStop()) return;
       title = selected.title;
     }
-    const prepared = await prepareGame({ attachment, title, shouldStop });
+    const prepared = await prepareGame({ attachment, title, baseOnly: options.baseOnly, shouldStop });
     if (shouldStop()) return;
     server = await deployServer({ attachment, image, ...prepared, port });
     console.log('Serving on http://' + (server.address || '<console ip>') + ':' + port + '/ (HTTP + read-only WebDAV)');

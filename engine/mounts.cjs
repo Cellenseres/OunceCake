@@ -37,6 +37,11 @@ function createGameFiles(attachment) {
       const filename = Buffer.alloc(0x301);
       filename.write(contentPath);
 
+      // Hold one context across both base views.
+      if (!update && !dlc && title.startsWith('04')) {
+        await prepareInstalledLicense({...attachment, title, source});
+      }
+
       if (update || dlc || section === 'exefs') {
         await s.write(s.base + 0x2000, filename);
 
@@ -59,7 +64,7 @@ function createGameFiles(attachment) {
       if (update) {
         handle = await openUpdate({ title, storage, attributes, source, section, originalSource });
       } else if (section === 'exefs') {
-        handle = await openCode({ title: source.runtimeProgramId, storage, attributes, source });
+        handle = await openCode({ title: source.runtimeProgramId, storage: source.storage, attributes, source });
       } else {
         // use type 1 for base romfs, type 6 for dlc
         await s.write(s.base + 0x2000, filename);
@@ -451,7 +456,7 @@ function buildIndex(views) {
   return bytes;
 }
 
-async function prepareGame({ attachment: a, title, shouldStop = () => false }) {
+async function prepareGame({ attachment: a, title, baseOnly = false, shouldStop = () => false }) {
   const views = [];
   const sources = [];
   const absentSources = [];
@@ -582,10 +587,10 @@ async function prepareGame({ attachment: a, title, shouldStop = () => false }) {
 
   cancelled();
 
-  const updates = await discoverUpdates({ ...a, title });
+  const updates = baseOnly ? [] : await discoverUpdates({ ...a, title });
   cancelled();
 
-  const dlc = await discoverDlc({ ...a, title });
+  const dlc = baseOnly ? [] : await discoverDlc({ ...a, title });
   const installed = [4, 5, 2].map((storage) => ({ storage }));
   const base = await mountView('/base', 'romfs', installed, true);
   await mountView(

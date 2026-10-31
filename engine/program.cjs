@@ -3,6 +3,7 @@ const path = require('node:path');
 const { idBytes, fixedOutput, pathRequest, resultError, success, withCleanup, closeHandles } = require('./protocol.cjs');
 const { findOriginalContent, isInstalledUpdate, programMatchesApplication } = require('./content.cjs');
 const { withProgramIndexMap, openProgramRomfs } = require('./fs-context.cjs');
+const { prepareNativeInstalledLicense } = require('./native-license.cjs');
 
 // if license on most recent account doesn't work, try other ones on the system
 async function linkedAccounts(s, domain, service) {
@@ -74,6 +75,12 @@ async function prepareInstalledLicense({ s, root, domain, service, title, source
     source.applicationTitle === title &&
     source.metaType === 0x82 &&
     source.contentType === 2;
+
+  // Native base content needs FS606 identity and account context.
+  if (contentProgramId.startsWith('04') && !installedPatch && !installedDlc) {
+    return prepareNativeInstalledLicense({s, root, domain, service,
+      programId: contentProgramId, storage: source.storage});
+  }
 
   const ncm = await service('ncm');
   const opened = await s.ipc('Open installed license content storage', ncm, 4, Buffer.from([source.storage]));
