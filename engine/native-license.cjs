@@ -34,7 +34,7 @@ function count(reply, label, limit = 8000) {
   return n;
 }
 
-async function nativeOwners(ipc, application) {
+async function nativeOwners(ipc, application, {optional = false} = {}) {
   let ids;
   let capacity = 64;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -67,12 +67,16 @@ async function nativeOwners(ipc, application) {
       if (!owner.equals(Buffer.alloc(8))) matches.push({uuid, owner});
     }
   }
-  if (!matches.length) throw new Error('No installed account ELicense for ' + application);
+  if (!matches.length && !optional) throw new Error('No installed account ELicense for ' + application);
   return matches;
 }
 
-async function prepareNativeInstalledLicense({s, root, domain, service, programId, storage}) {
+async function prepareNativeInstalledLicense({s, root, domain, service, programId, storage, optional = false}) {
   if (s.threads.size) throw new Error('Prepare native license before starting the server');
+  const es = await service('es');
+  const esIpc = licenseIpc(s, es);
+  const matches = await nativeOwners(esIpc, programId, {optional});
+  if (!matches.length) return false;
   const input = Buffer.alloc(16);
   input[0] = storage;
   idBytes(programId).copy(input, 8);
@@ -87,9 +91,6 @@ async function prepareNativeInstalledLicense({s, root, domain, service, programI
   if (owned && !s.handles.has(owned.handle)) owned = undefined;
   if (owned?.prepared.has(rightsHex)) return true;
 
-  const es = await service('es');
-  const esIpc = licenseIpc(s, es);
-  const matches = await nativeOwners(esIpc, application);
   let context;
   try {
     if (!owned) {
@@ -119,6 +120,7 @@ async function prepareNativeInstalledLicense({s, root, domain, service, programI
     if (accepted.some(title => !owned.applications.has(title)) || titles.some(title => !accepted.includes(title))) {
       throw new Error('Native ELicense rights are not usable for ' + application);
     }
+    console.log('Using installed ELicense for ' + application);
     await esIpc(503, Buffer.alloc(0), [rights, Buffer.alloc(4)]);
     owned.prepared.add(rightsHex);
     return true;

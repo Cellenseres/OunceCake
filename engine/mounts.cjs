@@ -478,7 +478,12 @@ async function prepareGame({ attachment: a, title, baseOnly = false, shouldStop 
         throw error;
 
       prepared.add(error.source.contentPath);
-      await prepareInstalledLicense({ ...a, title, source: error.source });
+      try {
+        await prepareInstalledLicense({ ...a, title, source: error.source });
+      } catch (failure) {
+        failure.source ||= error.source;
+        throw failure;
+      }
       cancelled();
       return files.open({ title, ...options });
     }
@@ -514,7 +519,7 @@ async function prepareGame({ attachment: a, title, baseOnly = false, shouldStop 
       console.log('Opening ' + prefix + '/' + section);
     }
     let mounted;
-    let lastError;
+    const failures = [];
 
     for (const candidate of candidates) {
       try {
@@ -533,14 +538,20 @@ async function prepareGame({ attachment: a, title, baseOnly = false, shouldStop 
           return { source: error.source };
         }
 
-        lastError = error;
+        failures.push({ storage: candidate.storage, error });
       }
     }
 
-    if (!mounted)
-      throw new Error(
-        'Could not prepare ' + prefix + '/' + section + ': ' + (lastError?.message || 'No installed content'),
-      );
+    if (!mounted) {
+      const names = { 2: 'Game card', 3: 'System', 4: 'Internal', 5: 'SD' };
+      const missing = new Set([0xe05, 0x21005, 0x20a05]);
+      const cause = failures.find(({ error }) =>
+        error.source || !missing.has(error.nativeResult.canonical))?.error || failures.at(-1)?.error;
+      const details = failures.map(({ storage, error }) =>
+        '  ' + (names[storage] || 'Storage ' + storage) + ': ' + error.message).join('\n');
+      throw new Error('Could not prepare ' + prefix + '/' + section + ':\n' +
+        (details || '  No installed content'), { cause });
+    }
 
     const entries =
       mounted.kind === 'storage'

@@ -76,10 +76,12 @@ async function prepareInstalledLicense({ s, root, domain, service, title, source
     source.metaType === 0x82 &&
     source.contentType === 2;
 
-  // Native base content needs FS606 identity and account context.
-  if (contentProgramId.startsWith('04') && !installedPatch && !installedDlc) {
-    return prepareNativeInstalledLicense({s, root, domain, service,
-      programId: contentProgramId, storage: source.storage});
+  // Prefer installed ELicense rights for base content.
+  if (!installedPatch && !installedDlc) {
+    const required = contentProgramId.startsWith('04');
+    const prepared = await prepareNativeInstalledLicense({s, root, domain, service,
+      programId: contentProgramId, storage: source.storage, optional: !required});
+    if (prepared || required) return prepared;
   }
 
   const ncm = await service('ncm');

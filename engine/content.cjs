@@ -180,7 +180,10 @@ async function resolveContent({ s, domain, service, title, storage, update, dlc,
     for (const candidate of candidates) {
       const opened = await s.ipc('OpenContentMetaDatabase storage ' + candidate,
         ncm, 5, Buffer.from([candidate]));
-      if (opened.result && inactive.has(opened.result & 0x3fffff)) continue;
+      if (opened.result && inactive.has(opened.result & 0x3fffff)) {
+        failure = opened;
+        continue;
+      }
       const handle = own(success(opened, 'OpenContentMetaDatabase'));
       const latest = await s.ipc('GetLatestContentMetaKey storage ' + candidate, handle, 6,
         idBytes(contentTitle));
