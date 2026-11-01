@@ -31,14 +31,16 @@ function createGameFiles(attachment) {
         storage,
         update,
         dlc,
+        allowDlc: !update && !dlc,
       });
 
       const { contentPath, attributes } = source;
+      const isDlc = source.selection === 'dlc';
       const filename = Buffer.alloc(0x301);
       filename.write(contentPath);
 
       // Hold one context across both base views.
-      if (!update && !dlc && title.startsWith('04')) {
+      if (!update && !isDlc && title.startsWith('04')) {
         await prepareInstalledLicense({...attachment, title, source});
       }
 
@@ -71,14 +73,14 @@ function createGameFiles(attachment) {
 
         const input = Buffer.alloc(8);
         input[0] = attributes;
-        input.writeUInt32LE(dlc ? 6 : 1, 4);
+        input.writeUInt32LE(isDlc ? 6 : 1, 4);
 
         try {
           handle = domain.oneHandle(
             await send('OpenDataStorageByPath', root, pathRequest(206, input, s.base + 0x2000)),
           );
         } catch (error) {
-          if (!dlc && error.nativeResult?.canonical === 0x7d202) error.code = 'GAME_ROMFS_ABSENT';
+          if (!isDlc && error.nativeResult?.canonical === 0x7d202) error.code = 'GAME_ROMFS_ABSENT';
 
           throw error;
         }
@@ -96,7 +98,7 @@ function createGameFiles(attachment) {
         mounted.size = safeSize(reply.data.readBigUInt64LE());
       }
 
-      if (!update && !dlc) originalSource = source;
+      if (!update && !isDlc) originalSource = source;
       return mounted;
     } catch (error) {
       if (source) error.source = source;
@@ -479,7 +481,7 @@ async function prepareGame({ attachment: a, title, baseOnly = false, shouldStop 
 
       prepared.add(error.source.contentPath);
       try {
-        await prepareInstalledLicense({ ...a, title, source: error.source });
+        await prepareInstalledLicense({ ...a, title: error.source.applicationTitle || title, source: error.source });
       } catch (failure) {
         failure.source ||= error.source;
         throw failure;
@@ -598,17 +600,21 @@ async function prepareGame({ attachment: a, title, baseOnly = false, shouldStop 
 
   cancelled();
 
-  const updates = baseOnly ? [] : await discoverUpdates({ ...a, title });
-  cancelled();
-
-  const dlc = baseOnly ? [] : await discoverDlc({ ...a, title });
   const installed = [4, 5, 2].map((storage) => ({ storage }));
   const base = await mountView('/base', 'romfs', installed, true);
-  await mountView(
-    '/base',
-    'exefs',
-    installed.filter((candidate) => candidate.storage === base.source.storage),
-  );
+  const standaloneDlc = base.source.selection === 'dlc';
+  if (!standaloneDlc) {
+    await mountView(
+      '/base',
+      'exefs',
+      installed.filter((candidate) => candidate.storage === base.source.storage),
+    );
+  }
+  cancelled();
+
+  const updates = baseOnly || standaloneDlc ? [] : await discoverUpdates({ ...a, title });
+  cancelled();
+  const dlc = baseOnly || standaloneDlc ? [] : await discoverDlc({ ...a, title });
 
   for (const group of groups(updates)) {
     const prefix = '/updates/' + group[0].version;

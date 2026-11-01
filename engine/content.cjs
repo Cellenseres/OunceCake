@@ -159,9 +159,7 @@ const discoverSystemData = (options) =>
 
 
 
-async function resolveContent({ s, domain, service, title, storage, update, dlc, contentType = 1 }) {
-  const contentName = { 1: 'Program', 2: 'Data', 3: 'Control' }[contentType];
-
+async function resolveContent({ s, domain, service, title, storage, update, dlc, contentType = 1, allowDlc = false }) {
   const handles = [];
   const own = (reply) => {
     const h = domain.oneHandle(reply);
@@ -200,11 +198,17 @@ async function resolveContent({ s, domain, service, title, storage, update, dlc,
       throw resultError('GetLatestContentMetaKey for ' + contentTitle, failure?.result || 0xe05);
     storage = usedStorage;
 
-    if (dlc || update) {
+    const directDlc = allowDlc && !dlc && !update && key[12] === 0x82;
+    if (directDlc) contentType = 2;
+    const contentName = { 1: 'Program', 2: 'Data', 3: 'Control' }[contentType];
+    let applicationTitle = title;
+
+    if (dlc || update || directDlc) {
       const owner = success(
-        await s.ipc('Verify selected ' + (dlc ? 'DLC' : 'update') + ' application', database, 22, key),
+        await s.ipc('Verify selected ' + (dlc || directDlc ? 'DLC' : 'update') + ' application', database, 22, key),
         'GetOwnerApplicationId',
       );
+      if (directDlc) applicationTitle = owner.data.readBigUInt64LE().toString(16).padStart(16, '0');
     }
 
     const input = Buffer.alloc(24);
@@ -258,10 +262,10 @@ async function resolveContent({ s, domain, service, title, storage, update, dlc,
       });
     }
 
-    if (dlc) {
+    if (dlc || directDlc) {
       Object.assign(source, {
         selection: 'dlc',
-        applicationTitle: title,
+        applicationTitle,
         contentTitle,
       });
     }
