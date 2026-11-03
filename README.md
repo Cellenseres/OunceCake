@@ -10,6 +10,16 @@ Use Node.js 22 or newer and an already held run from [our ns2jb variant](https:/
 
 ## Browse a title
 
+### GUI
+
+```sh
+node gui.cjs [--port 8765] [--no-open]
+```
+
+Opens a local page (127.0.0.1 only) where you enter the held run directory, pick a game from a filterable list, and either serve it (port, base-only) or export raw NCAs (output folder, skip Program). Logs and the server address are shown on the page. Same requirements as the CLI.
+
+### CLI
+
 ```sh
 node ouncecake.cjs <held-run-directory> [title-id] [--port 8080]
 ```
