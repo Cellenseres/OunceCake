@@ -20,7 +20,7 @@ For a native digital base title:
 node ouncecake.cjs <held-run-directory> 040029A01D3E0000 --base-only --port 8080
 ```
 
-Open the printed HTTP address. `/base/exefs/` contains CodeFS files; `/base/romfs/` contains the RomFS tree. The same paths support read-only WebDAV. `--base-only` omits update and DLC discovery. Without a title ID, the CLI offers title selection.
+Open the printed HTTP address. `/base/exefs/` contains CodeFS files; `/base/romfs/` contains the RomFS tree. `/base/control/` (and `/updates/<version>/control/` for updates) contains the decrypted Control NCA files (`control.nacp` and the `icon_*.dat` JPEG icons). `logo/`, `manual/`, `legal/` and `meta/` are served the same way for base and updates. Each is skipped with a log line when the title doesn't have it. The same paths support read-only WebDAV. `--base-only` omits update and DLC discovery. Without a title ID, the CLI offers title selection.
 
 ELicense preparation uses the content's FS606 RightsId and installed owner accounts. The rights context stays open throughout serving. No separate registration script or plaintext titlekey is needed. A prior FS206 RomFS read succeeded; complete native-title ExeFS and HTTP serving still require the [manual checks](docs/VALIDATION.md).
 
