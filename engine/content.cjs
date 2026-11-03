@@ -200,7 +200,7 @@ async function resolveContent({ s, domain, service, title, storage, update, dlc,
 
     const directDlc = allowDlc && !dlc && !update && key[12] === 0x82;
     if (directDlc) contentType = 2;
-    const contentName = { 1: 'Program', 2: 'Data', 3: 'Control' }[contentType];
+    const contentName = { 0: 'Meta', 1: 'Program', 2: 'Data', 3: 'Control', 4: 'Manual', 5: 'Legal' }[contentType];
     let applicationTitle = title;
 
     if (dlc || update || directDlc) {
@@ -276,7 +276,7 @@ async function resolveContent({ s, domain, service, title, storage, update, dlc,
 
 const resolveProgramContent = (options) => resolveContent({ ...options, dlc: undefined, contentType: 1 });
 const resolveControlContent = (options) =>
-  resolveContent({ ...options, dlc: undefined, update: undefined, contentType: 3 });
+  resolveContent({ ...options, dlc: undefined, contentType: 3 });
 const resolveDlcContent = (options) => {
   return resolveContent({ ...options, contentType: 2 });
 };

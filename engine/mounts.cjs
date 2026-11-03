@@ -1,7 +1,7 @@
 const path = require('node:path');
 const { TextDecoder } = require('node:util');
 const { success, pathRequest, idBytes, resultError, cleanup, closeHandles, throwIfCancelled } = require('./protocol.cjs');
-const { discoverUpdates, discoverDlc, resolveProgramContent, resolveDlcContent, programMatchesApplication } = require('./content.cjs');
+const { discoverUpdates, discoverDlc, resolveContent, resolveProgramContent, resolveDlcContent, programMatchesApplication } = require('./content.cjs');
 const { createProgramMounts, prepareInstalledLicense } = require('./program.cjs');
 
 // ncm mounts + metadata used for getting the http server ready
@@ -9,6 +9,15 @@ const { createProgramMounts, prepareInstalledLicense } = require('./program.cjs'
 const MAX_CHUNK = 0x40000;
 const safeSize = (n) => { // lol, ai put this in. in what situation would this ever happen
   return Number(n);
+};
+
+// ncm content type -> fs proxy filesystem type (2 logo, 3 control, 4 manual, 5 meta)
+const EXTRA_SECTIONS = {
+  logo: { contentType: 1, fsType: 2 },
+  control: { contentType: 3, fsType: 3 },
+  manual: { contentType: 4, fsType: 4 },
+  legal: { contentType: 5, fsType: 4 },
+  meta: { contentType: 0, fsType: 5 },
 };
 
 function createGameFiles(attachment) {
@@ -21,6 +30,27 @@ function createGameFiles(attachment) {
   async function open({ title, storage, section = 'romfs', update, dlc }) {
     let source;
     let mounted;
+
+    if (EXTRA_SECTIONS[section]) {
+      const { contentType, fsType } = EXTRA_SECTIONS[section];
+      source = await resolveContent({ s, domain, service, title, storage, update, contentType });
+      const filename = Buffer.alloc(0x301);
+      filename.write(source.contentPath);
+      await s.write(s.base + 0x2000, filename);
+      const input = Buffer.alloc(16);
+      input[0] = source.attributes;
+      input.writeUInt32LE(fsType, 4);
+      idBytes(title).copy(input, 8);
+      try {
+        const handle = domain.oneHandle(await send(
+          'Open installed game ' + section + ' filesystem', root, pathRequest(10, input, s.base + 0x2000),
+        ));
+        return { handle, kind: 'filesystem', source, title };
+      } catch (error) {
+        error.source = source;
+        throw error;
+      }
+    }
 
     try {
       source = await (dlc ? resolveDlcContent : resolveProgramContent)({
@@ -584,6 +614,18 @@ async function prepareGame({ attachment: a, title, baseOnly = false, shouldStop 
     return mounted;
   }
 
+  // optional views; many titles lack some of them, so failures are logged and skipped
+  async function mountExtras(prefix, candidates) {
+    for (const section of Object.keys(EXTRA_SECTIONS)) {
+      try {
+        await mountView(prefix, section, candidates);
+      } catch (error) {
+        if (error.code === 'FTP_CANCELLED') throw error;
+        console.log(section + ' data unavailable for ' + prefix + ': ' + error.message.split('\n')[0]);
+      }
+    }
+  }
+
   function groups(records) {
     const grouped = new Map();
 
@@ -612,6 +654,14 @@ async function prepareGame({ attachment: a, title, baseOnly = false, shouldStop 
   }
   cancelled();
 
+  if (!standaloneDlc) {
+    await mountExtras(
+      '/base',
+      installed.filter((candidate) => candidate.storage === base.source.storage),
+    );
+  }
+  cancelled();
+
   const updates = baseOnly || standaloneDlc ? [] : await discoverUpdates({ ...a, title });
   cancelled();
   const dlc = baseOnly || standaloneDlc ? [] : await discoverDlc({ ...a, title });
@@ -624,11 +674,9 @@ async function prepareGame({ attachment: a, title, baseOnly = false, shouldStop 
       update: { contentTitle: item.contentTitle, version: item.version },
     }));
     const update = await mountView(prefix, 'romfs', candidates);
-    await mountView(
-      prefix,
-      'exefs',
-      candidates.filter((candidate) => candidate.storage === update.source.storage),
-    );
+    const sameStorage = candidates.filter((candidate) => candidate.storage === update.source.storage);
+    await mountView(prefix, 'exefs', sameStorage);
+    await mountExtras(prefix, sameStorage);
   }
 
   for (const group of groups(dlc)) {
